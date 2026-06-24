@@ -6,6 +6,7 @@ import random
 app = Flask(__name__)
 app.config["SESSION_PERMANENT"] = False
 app.config["SESSION_TYPE"] = "filesystem"
+app.config["SESSION_FILE_DIR"] = "/tmp/flask_session"
 Session(app)
 
 # Mapa maestro de tipos del Modelo A
@@ -30,15 +31,21 @@ MAPA_TIPOS = {
 
 @app.route('/')
 def index():
+    # Clonamos la lista original para no alterarla permanentemente en el archivo preguntas.py
+    lista_mezclada = list(PREGUNTAS)
+    # MEZCLA LAS PREGUNTAS: Ahora saldrán variadas y no en orden Ne, Ti, Ni...
+    random.shuffle(lista_mezclada)
+    
+    # Guardamos la lista con el orden aleatorio único para esta sesión de usuario
+    session['lista_preguntas_sesion'] = lista_mezclada
     session['progreso'] = 0
     session['respuestas'] = []
     
-    # Inicializamos la memoria de la Ley de Compensación Estructural
     session['obligatorios_proxima'] = {
-        "EGO": None,       # Balancea 'opcion_1' y 'opcion_2'
-        "SUPER_EGO": None, # Balancea 'opcion_3' (Rol) y 'opcion_4' (Vulnerable)
-        "SUPER_ID": None,  # Balancea 'opcion_5' y 'opcion_6'
-        "ID": None         # Balancea 'opcion_7' y 'opcion_8'
+        "EGO": None,       
+        "SUPER_EGO": None, 
+        "SUPER_ID": None,  
+        "ID": None         
     }
     return render_template('index.html')
 
@@ -46,11 +53,16 @@ def index():
 def test():
     progreso = session.get('progreso', 0)
     obligatorios = session.get('obligatorios_proxima', {})
+    lista_preguntas = session.get('lista_preguntas_sesion', [])
     
-    if progreso >= len(PREGUNTAS):
+    # Si por alguna razón se limpia la sesión, redirige al inicio
+    if not lista_preguntas:
+        return redirect(url_for('index'))
+        
+    if progreso >= len(lista_preguntas):
         return redirect(url_for('resultado'))
         
-    pregunta_actual = PREGUNTAS[progreso]
+    pregunta_actual = lista_preguntas[progreso]
     
     if request.method == 'POST':
         opcion_seleccionada = request.form.get('opcion')
@@ -75,40 +87,30 @@ def test():
     proximos_obligatorios = {}
 
     for bloque_nombre, lista_opciones in macro_bloques.items():
-        # Si la pregunta anterior dejó fijada una opción por compensación de la psique
         if obligatorios.get(bloque_nombre):
             elegida = obligatorios[bloque_nombre]
             claves_a_mostrar.append(elegida)
-            # El bloque ya se equilibró, la siguiente vuelta vuelve a ser libre
             proximos_obligatorios[bloque_nombre] = None
         else:
-            # Si no hay obligación previa, elegimos una de las dos opciones por azar (50% / 50%)
             elegida = random.choice(lista_opciones)
             claves_a_mostrar.append(elegida)
             
-            # DEJAMOS LA LEY LISTA: La opción hermana que se quedó fuera hoy, sale obligada mañana
             if elegida == "opcion_1": proximos_obligatorios["EGO"] = "opcion_2"
             elif elegida == "opcion_2": proximos_obligatorios["EGO"] = "opcion_1"
-            
-            elif elegida == "opcion_3": proximos_obligatorios["SUPER_EGO"] = "opcion_4"  # Salió Rol -> Obliga Vulnerable
-            elif elegida == "opcion_4": proximos_obligatorios["SUPER_EGO"] = "opcion_3"  # Salió Vulnerable -> Obliga Rol
-            
+            elif elegida == "opcion_3": proximos_obligatorios["SUPER_EGO"] = "opcion_4"  
+            elif elegida == "opcion_4": proximos_obligatorios["SUPER_EGO"] = "opcion_3"  
             elif elegida == "opcion_5": proximos_obligatorios["SUPER_ID"] = "opcion_6"
             elif elegida == "opcion_6": proximos_obligatorios["SUPER_ID"] = "opcion_5"
-            
             elif elegida == "opcion_7": proximos_obligatorios["ID"] = "opcion_8"
             elif elegida == "opcion_8": proximos_obligatorios["ID"] = "opcion_7"
 
-    # Guardamos los estados para la siguiente iteración
     session['obligatorios_proxima'] = proximos_obligatorios
 
-    # Construimos el mapeo dinámico leyendo la clave 'opciones' de preguntas.py
     opciones_finales = []
     for clave in claves_a_mostrar:
         texto_opcion = pregunta_actual["opciones"][clave]
         opciones_finales.append((clave, texto_opcion))
         
-    # Mezclamos las 4 opciones finales en pantalla para camuflar el orden visual
     random.shuffle(opciones_finales)
 
     return render_template('test.html', 
@@ -124,45 +126,4 @@ def resultado():
         return redirect(url_for('index'))
 
     tabla_tipos = {tipo: 0 for tipo in MAPA_TIPOS.values()}
-    puntajes_elementos = {el: 0 for el in ["NE", "TI", "NI", "TE", "FE", "FI", "SE", "SI"]}
-    conteos_bloques = {f"opcion_{i}": 0 for i in range(1, 9)}
-
-    for r in respuestas:
-        elemento = r["elemento"]
-        bloque = r["bloque"]
-        conteos_bloques[bloque] += 1
-        
-        # Ponderación algorítmica por posición psíquica
-        if bloque == "opcion_1": puntajes_elementos[elemento] += 4   
-        elif bloque == "opcion_2": puntajes_elementos[elemento] += 3 
-        elif bloque == "opcion_4": puntajes_elementos[elemento] -= 4 # Desempate drástico por vulnerabilidad
-        elif bloque == "opcion_5": puntajes_elementos[elemento] -= 1 
-        elif bloque == "opcion_8": puntajes_elementos[elemento] += 2 
-
-    # Diagnóstico avanzado cruzando bloques Ego y filtros de Súper-Ego
-    for (el_base, el_creative), nombre_tipo in MAPA_TIPOS.items():
-        score_base = puntajes_elementos[el_base]
-        score_creative = puntajes_elementos[el_creative]
-        
-        peso_tipo = (score_base * 2) + score_creative
-        
-        # Inferencia por rechazo de bloques vulnerables de la contraparte
-        if nombre_tipo.startswith("EII") or nombre_tipo.startswith("IEE"):
-            if puntajes_elementos["SE"] < 0 or puntajes_elementos["TI"] < 0:
-                peso_tipo += 5  
-                
-        if nombre_tipo.startswith("ILE") or nombre_tipo.startswith("LII"):
-            if puntajes_elementos["FI"] < 0:
-                peso_tipo += 5
-
-        if nombre_tipo.startswith("SLE") or nombre_tipo.startswith("LSI"):
-            if puntajes_elementos["FI"] < 0 or puntajes_elementos["NE"] < 0:
-                peso_tipo += 5
-
-        tabla_tipos[nombre_tipo] = peso_tipo
-
-    tipo_ganador = max(tabla_tipos, key=tabla_tipos.get)
-    return render_template('resultado.html', tipo=tipo_ganador, conteo=conteos_bloques)
-
-if __name__ == '__main__':
-    app.run(debug=True)
+    puntajes_elementos = {el: 0 for el in
