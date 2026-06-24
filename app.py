@@ -126,4 +126,43 @@ def resultado():
         return redirect(url_for('index'))
 
     tabla_tipos = {tipo: 0 for tipo in MAPA_TIPOS.values()}
-    puntajes_elementos = {el: 0 for el in
+    puntajes_elementos = {el: 0 for el in ["NE", "TI", "NI", "TE", "FE", "FI", "SE", "SI"]}
+    conteos_bloques = {f"opcion_{i}": 0 for i in range(1, 9)}
+
+    for r in respuestas:
+        elemento = r["elemento"]
+        bloque = r["bloque"]
+        conteos_bloques[bloque] += 1
+        
+        if bloque == "opcion_1": puntajes_elementos[elemento] += 4   
+        elif bloque == "opcion_2": puntajes_elementos[elemento] += 3 
+        elif bloque == "opcion_4": puntajes_elementos[elemento] -= 4 
+        elif bloque == "opcion_5": puntajes_elementos[elemento] -= 1 
+        elif bloque == "opcion_8": puntajes_elementos[elemento] += 2 
+
+    for (el_base, el_creative), nombre_tipo in MAPA_TIPOS.items():
+        score_base = puntajes_elementos[el_base]
+        score_creative = puntajes_elementos[el_creative]
+        
+        peso_tipo = (score_base * 2) + score_creative
+        
+        # Corrección segura de strings para evitar errores de tipo None
+        if "EII" in nombre_tipo or "IEE" in nombre_tipo:
+            if puntajes_elementos["SE"] < 0 or puntajes_elementos["TI"] < 0:
+                peso_tipo += 5  
+                
+        if "ILE" in nombre_tipo or "LII" in nombre_tipo:
+            if puntajes_elementos["FI"] < 0:
+                peso_tipo += 5
+
+        if "SLE" in nombre_tipo or "LSI" in nombre_tipo:
+            if puntajes_elementos["FI"] < 0 or puntajes_elementos["NE"] < 0:
+                peso_tipo += 5
+
+        tabla_tipos[nombre_tipo] = peso_tipo
+
+    tipo_ganador = max(tabla_tipos, key=tabla_tipos.get)
+    return render_template('resultado.html', tipo=tipo_ganador, conteo=conteos_bloques)
+
+if __name__ == '__main__':
+    app.run(debug=True)
